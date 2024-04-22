@@ -1,89 +1,121 @@
 #include "stencil.h"
+#include <math.h>
+#include <string.h>
 
+void exchange_ghost_cells_non_blocking(int id, int procs, int extent, int recv_count, double* local_data, double* extended_data, MPI_Request *request);
 
 int main(int argc, char **argv) {
-	if (4 != argc) {
-		printf("Usage: stencil input_file output_file number_of_applications\n");
-		return 1;
-	}
-	char *input_name = argv[1];
-	char *output_name = argv[2];
-	int num_steps = atoi(argv[3]);
+    if (4 != argc) {
+        printf("Usage: stencil input_file output_file number_of_applications\n");
+        return 1;
+    }
 
-	// Read input file
-	double *input;
-	int num_values;
-	if (0 > (num_values = read_input(input_name, &input))) {
-		return 2;
-	}
+    char *input_name = argv[1];
+    char *output_name = argv[2];
+    int num_steps = atoi(argv[3]);
 
-	// Stencil values
-	double h = 2.0*PI/num_values;
-	const int STENCIL_WIDTH = 5;
-	const int EXTENT = STENCIL_WIDTH/2;
-	const double STENCIL[] = {1.0/(12*h), -8.0/(12*h), 0.0, 8.0/(12*h), -1.0/(12*h)};
+    MPI_Init(&argc, &argv);
+    int procs, id;
+    MPI_Comm_size(MPI_COMM_WORLD, &procs);
+    MPI_Comm_rank(MPI_COMM_WORLD, &id);
 
-	// Start timer
-	double start = MPI_Wtime();
+    // Read input file on the root process
+    double *input = NULL;
+    int num_values = 0;
+        if (0 > (num_values = read_input(input_name, &input))) {
+                return 2;
+        }
 
-	// Allocate data for result
-	double *output;
-	if (NULL == (output = malloc(num_values * sizeof(double)))) {
-		perror("Couldn't allocate memory for output");
-		return 2;
-	}
-	// Repeatedly apply stencil
-	for (int s=0; s<num_steps; s++) {
-		// Apply stencil
-		for (int i=0; i<EXTENT; i++) {
-			double result = 0;
-			for (int j=0; j<STENCIL_WIDTH; j++) {
-				int index = (i - EXTENT + j + num_values) % num_values;
-				result += STENCIL[j] * input[index];
-			}
-			output[i] = result;
-		}
-		for (int i=EXTENT; i<num_values-EXTENT; i++) {
-			double result = 0;
-			for (int j=0; j<STENCIL_WIDTH; j++) {
-				int index = i - EXTENT + j;
-				result += STENCIL[j] * input[index];
-			}
-			output[i] = result;
-		}
-		for (int i=num_values-EXTENT; i<num_values; i++) {
-			double result = 0;
-			for (int j=0; j<STENCIL_WIDTH; j++) {
-				int index = (i - EXTENT + j) % num_values;
-				result += STENCIL[j] * input[index];
-			}
-			output[i] = result;
-		}
-		// Swap input and output
-		if (s < num_steps-1) {
-			double *tmp = input;
-			input = output;
-			output = tmp;
-		}
-	}
-	free(input);
-	// Stop timer
-	double my_execution_time = MPI_Wtime() - start;
+    // Broadcast the number of values to all processes
+    MPI_Bcast(&num_values, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
-	// Write result
-	printf("%f\n", my_execution_time);
-#ifdef PRODUCE_OUTPUT_FILE
-	if (0 != write_output(output_name, output, num_values)) {
-		return 2;
-	}
-#endif
+    // Calculate the number of elements each process will handle
+    int recv_count = num_values / procs;
 
-	// Clean up
-	free(output);
+    double *input_MPI = malloc(recv_count * sizeof(double));
+    double *output_MPI = malloc(recv_count * sizeof(double));
+    double *output = malloc(num_values * sizeof(double));
+    
+    MPI_Request request[4];
+    double h = 2.0 * PI / num_values; 
+    const int STENCIL_WIDTH = 5;
+    const int EXTENT = STENCIL_WIDTH / 2;
+    const double STENCIL[] = {1.0/(12*h), -8.0/(12*h), 0.0, 8.0/(12*h), -1.0/(12*h)};
+    double *extended_input = malloc((recv_count + 2 * STENCIL_WIDTH / 2) * sizeof(double));
 
-	return 0;
+    // Scatter the input data from the root process to all processes
+    MPI_Scatter(input, recv_count, MPI_DOUBLE, input_MPI, recv_count, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    memcpy(extended_input + STENCIL_WIDTH / 2, input_MPI, recv_count * sizeof(double));
+
+    // Start timer
+    double local_start_time, local_elapsed_time, max_elapsed_time;
+    MPI_Barrier(MPI_COMM_WORLD); 
+    local_start_time = MPI_Wtime();
+
+    // Main loop for the stencil application
+    for (int s = 0; s < num_steps; s++) {
+        exchange_ghost_cells_non_blocking(id, procs, EXTENT, recv_count, input_MPI, extended_input, request);
+
+        // Apply stencil
+        for (int i = 0; i < recv_count; i++) {
+            double result = 0;
+            for (int j = -EXTENT; j <= EXTENT; j++) {
+                int index = i + EXTENT + j;
+                result += STENCIL[j + EXTENT] * extended_input[index];
+            }
+            output_MPI[i] = result;
+        }
+
+        MPI_Waitall(4, request, MPI_STATUSES_IGNORE);
+
+        // Swap input and output
+        if (s < num_steps - 1) {
+            double *tmp = input_MPI;
+            input_MPI = output_MPI;
+            output_MPI = tmp;
+            memcpy(extended_input + EXTENT, input_MPI, recv_count * sizeof(double));
+        }
+    }
+
+    // Stop timer
+    local_elapsed_time = MPI_Wtime() - local_start_time;
+    MPI_Reduce(&local_elapsed_time, &max_elapsed_time, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+
+    // Gather the processed data from all processes to the root process
+    MPI_Gather(output_MPI, recv_count, MPI_DOUBLE, output, recv_count, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+
+    // Root process writes the result to the output file and prints the execution time
+    if (id == 0) {
+        printf("Maximum execution time across all processes: %f seconds\n", max_elapsed_time);
+        if (0 != write_output(output_name, output, num_values)) {
+            fprintf(stderr, "Failed to write output\n");
+        }
+        free(input);
+        free(output);
+    }
+
+    free(input_MPI);
+    free(output_MPI);
+    free(extended_input);
+
+    MPI_Finalize();
+
+    return 0;
 }
 
+void exchange_ghost_cells_non_blocking(int id, int procs, int extent, int recv_count, double* local_data, double* extended_data, MPI_Request *request) {
+    MPI_Status status;
+    int left_rank = (id == 0) ? procs - 1 : id - 1;
+    int right_rank = (id == procs - 1) ? 0 : id + 1;
+
+    // Send to the right, receive from the left
+    MPI_Isend(&local_data[recv_count - extent], extent, MPI_DOUBLE, right_rank, 0, MPI_COMM_WORLD, &request[0]);
+    MPI_Irecv(extended_data, extent, MPI_DOUBLE, left_rank, 0, MPI_COMM_WORLD, &request[1]);
+
+    // Send to the left, receive from the right
+    MPI_Isend(local_data, extent, MPI_DOUBLE, left_rank, 1, MPI_COMM_WORLD, &request[2]);
+    MPI_Irecv(&extended_data[recv_count + extent], extent, MPI_DOUBLE, right_rank, 1, MPI_COMM_WORLD, &request[3]);
+}
 
 int read_input(const char *file_name, double **values) {
 	FILE *file;

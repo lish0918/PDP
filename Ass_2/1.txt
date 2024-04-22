@@ -1,27 +1,7 @@
-The I/O of the program should be handled by the process with rank 0. This process
-is supposed to distribute the values evenly among all processes before the first stencil
-application and collect the result when the last application is done. You may the number of values is divisible by the number of processes. After the initial distribution,
-each process should apply the stencil on its received values and store the result in another
-array. Thereafter, each process repeatedly applies the stencil on the result of its last
-application until the specified number of applications are made. You can assume that the
-number of function values per process is larger than the stencil width. Note that in order
-to apply the stencil, each process will need data that is stored on its neighbouring nodes.
-How will you handle that?
-Figure 2 illustrates the procedure when 4 processes are used to apply a stencil twice on
-an array of length 28. Initially (in state SI), all values are stored in process 0. Next, the
-values are distributed among the four processes and in state S0 each process keeps its own
-part (7 elements) of the array. Thereafter, the stencil is applied twice, bringing us to state
-S2 via state S1. The second stencil application is made on the result of the first one. In
-state S2, the final result is computed, but it is still distributed among the four processes.
-Hence, to reach the final state (SF) and being able to report the result, process 0 must
-collect all the resulting values. The array elements that are marked with grey are needed
-for the stencil application on a neighbouring node.
-Each process is supposed to measure the time to apply the stencil, but only the largest
-value (among all processes) should be printed. The time measurement shall include the
-application of the stencil and the inter-process communication that needs to be done in
-each step. It shall not include the time needed for reading the input file and writing of the
-output file. Neither shall it include the time needed for the initial distribution or the final
-collection of data.Your parallelisation is supposed to speed up the execution of the program, but you must
-not change its functionality! The assignment is graded automatically and any difference in
-the output (except from the value (but not the format!) of the stencil application time),
-compared to the original program, will lead to immediate rejection.
+cd ../../../../../../proj/uppmax2024-2-9/A2/
+
+input1000000.txt  input120.txt  input2000000.txt  input4000000.txt  input8000000.txt  input96.txt  output96_4_ref.txt
+
+输入：
+mpirun -np 1 ./stencil ../../../../../../../proj/uppmax2024-2-9/A2/input96.txt output96_4_ref.txt 4
+mpirun -np 1 ./stencil ../../../../../../../proj/uppmax2024-2-9/A2/input96.txt ../../../../../../../scratch/uppmax2024-2-9/output96_4_ref.txt 4
