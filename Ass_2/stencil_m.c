@@ -1,9 +1,6 @@
 #include "stencil.h"
-#include <mpi.h>
 #include <math.h>
 #include <string.h>
-#include <stdlib.h>
-#include <stdio.h>
 
 void exchange_ghost_cells_non_blocking(int id, int procs, int extent, int recv_count, double* local_data, double* extended_data, MPI_Request *request);
 
@@ -79,7 +76,6 @@ int main(int argc, char **argv) {
             memcpy(extended_input + EXTENT, input_MPI, recv_count * sizeof(double));
         }
     }
-
 
     // Stop timer
     local_elapsed_time = MPI_Wtime() - local_start_time;
