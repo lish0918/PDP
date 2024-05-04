@@ -1,46 +1,21 @@
 import matplotlib.pyplot as plt
 
-# 数据初始化
-data = {
-    '1': {'Problem Size': 1000000, 'Execution Time': 0.0534, 'Efficiency': 1.00},
-    '2': {'Problem Size': 2000000, 'Execution Time': 0.0636, 'Efficiency': 1.08},
-    '4': {'Problem Size': 4000000, 'Execution Time': 0.0611, 'Efficiency': 1.04},
-    '8': {'Problem Size': 8000000, 'Execution Time': 0.0728, 'Efficiency': 0.95},
-    '2b': {'Problem Size': 1000000, 'Execution Time': 0.0323, 'Efficiency': 0.83},
-    '4b': {'Problem Size': 2000000, 'Execution Time': 0.0253, 'Efficiency': 1.36},
-    '8b': {'Problem Size': 4000000, 'Execution Time': 0.0345, 'Efficiency': 0.92},
-    '16b': {'Problem Size': 8000000, 'Execution Time': 0.0660, 'Efficiency': 0.52}
-}
+# 提取数据并计算效率
+problem_sizes = [1000000, 2000000, 4000000, 8000000]
+efficiency_1mil = [1.00,1.08,1.04,0.95]
+efficiency_5mil = [0.83,1.36,0.92,0.52]
 
-# 提取数据
-x = []
-y = []
-sizes = []
-
-for key, value in data.items():
-    num_processes = int(key.replace('b', ''))  # 处理带 'b' 的键，表示第二组数据
-    execution_time = value['Execution Time']
-    problem_size = value['Problem Size']
-    efficiency = value['Efficiency']
-    
-    x.append(num_processes)
-    y.append(execution_time)
-    sizes.append(problem_size)
-
-# 绘制图表
+# 绘制效率图
 plt.figure(figsize=(10, 6))
-
-# 绘制 Execution Time 随 Processes 的变化曲线
-plt.plot(x, y, marker='o', label='Execution Time')
-
-# 绘制 Problem Size 随 Processes 的变化曲线
-plt.plot(x, sizes, marker='s', label='Problem Size')
-
-plt.xlabel('Number of Processes')
-plt.ylabel('Value')
-plt.title('Weak Scalability Experiment Results')
-plt.xticks(x)
+plt.plot(problem_sizes, efficiency_1mil, marker='o', label='10,000,000 per Process')
+plt.plot(problem_sizes, efficiency_5mil, marker='s', label='5,000,000 per Process')
+plt.plot(problem_sizes, [1]*4, '--', label='Ideal Efficiency')
+plt.xlabel('Problem Size')
+plt.ylabel('Efficiency')
+plt.ylim(0, 1.5)
+plt.title('Efficiency with Problem Size and Processes Increase')
+plt.xticks(problem_sizes)
 plt.legend()
+plt.gca().set_facecolor('whitesmoke')
 plt.grid(True)
-
 plt.show()
