@@ -3,5 +3,5 @@ cd ../../../../../../proj/uppmax2024-2-9/A2/
 input1000000.txt  input120.txt  input2000000.txt  input4000000.txt  input8000000.txt  input96.txt  output96_4_ref.txt
 
 输入：
-mpirun -np 1 ./stencil ../../../../../../../proj/uppmax2024-2-9/A2/input96.txt output96_4_ref.txt 4
+mpirun -np 1 ./stencil ../../../../../../../proj/uppmax2024-2-9/A2/input1000000.txt output96_4_ref.txt 10
 mpirun -np 1 ./stencil ../../../../../../../proj/uppmax2024-2-9/A2/input96.txt ../../../../../../../scratch/uppmax2024-2-9/output96_4_ref.txt 4

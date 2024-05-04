@@ -16,7 +16,6 @@
 #define PI 3.14159265358979323846
 #define PRODUCE_OUTPUT_FILE
 
-#include <mpi.h>
 #include <stdio.h>
 #include <stdlib.h>
 
