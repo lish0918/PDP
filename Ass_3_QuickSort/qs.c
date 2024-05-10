@@ -26,6 +26,10 @@ int partition(int *arr, int low, int high, int pivot) {
     return (i + 1);
 }
 
+int compare(const void *a, const void *b) {
+    return (*(int *)a - *(int *)b);
+}
+
 // Parallel quicksort function using MPI
 void parallel_quicksort(int *arr, int n, int my_rank, int p, MPI_Comm comm, int pivot_strategy) {
     int *local_data;
@@ -59,7 +63,7 @@ void parallel_quicksort(int *arr, int n, int my_rank, int p, MPI_Comm comm, int 
 
     // Select pivot based on strategy
     if (my_rank == 0) {
-        quicksort(all_pivots, 0, p - 1);
+        qsort(all_pivots, p, sizeof(int), compare);
         switch (pivot_strategy) {
             case 1:
                 pivot = all_pivots[rand() % p]; // Random pivot strategy
@@ -67,14 +71,14 @@ void parallel_quicksort(int *arr, int n, int my_rank, int p, MPI_Comm comm, int 
             case 2:
                 pivot = all_pivots[p / 2]; // Median of medians pivot strategy
                 break;
-            case 3:
-                // Calculate mean pivot strategy
+            case 3:{
                 int sum = 0;
                 for (int i = 0; i < p; i++) {
                     sum += all_pivots[i];
                 }
                 pivot = sum / p;
                 break;
+            }
             default:
                 pivot = all_pivots[p / 2]; // Default to median of medians
                 break;
@@ -175,7 +179,7 @@ int main(int argc, char *argv[]) {
     start_time = MPI_Wtime();
 
     // Perform parallel quicksort
-    parallel_quicksort(local_data, n, my_rank, p, MPI_COMM_WORLD, pivot_strategy);
+    parallel_quicksort(local_data, local_n, my_rank, p, MPI_COMM_WORLD, pivot_strategy);
 
     end_time = MPI_Wtime();
 
