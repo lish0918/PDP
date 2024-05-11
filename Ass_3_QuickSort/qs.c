@@ -2,211 +2,191 @@
 #include <stdlib.h>
 #include <string.h>
 #include <mpi.h>
-#include <time.h>
 
-#define MAX_FILENAME_LENGTH 256
-
-// Function to swap two integers
-void swap(int *a, int *b) {
-    int temp = *a;
-    *a = *b;
-    *b = temp;
-}
-
-// Partition function to divide data based on pivot
-int partition(int *arr, int low, int high, int pivot) {
-    int i = low - 1;
-    for (int j = low; j <= high - 1; j++) {
-        if (arr[j] <= pivot) {
-            i++;
-            swap(&arr[i], &arr[j]);
-        }
-    }
-    swap(&arr[i + 1], &arr[high]);
-    return (i + 1);
-}
-
-int compare(const void *a, const void *b) {
+// Helper function to compare integers (used by qsort)
+int compare_integers(const void *a, const void *b) {
     return (*(int *)a - *(int *)b);
 }
 
-// Parallel quicksort function using MPI
-void parallel_quicksort(int *arr, int n, int my_rank, int p, MPI_Comm comm, int pivot_strategy) {
-    int *local_data;
-    int local_n;
-    int *all_pivots;
-    int *pivots;
-    int pivot;
+// Function to perform local quicksort on a segment of the array
+void local_quicksort(int *array, int start, int end) {
+    qsort(&array[start], end - start + 1, sizeof(int), compare_integers);
+}
 
-    /* 进程0把需要排序的数组均分给p个进程，
-    每个进程内进行局部排序，然后选取p个中位数作为每个进程的pivot，
-    将这些pivot发送给进程0，进程0随机选取一个pivot作为全局pivot（策略1），
-    进程0选取这些pivot的中位数作为全局pivot（策略2），
-    进程0选取所有pivot的均值数作为全局pivot（策略3），
-    然后广播给所有进程，每个进程根据全局pivot将数据分为两部分，
-    一部分小于pivot，一部分大于pivot，然后将这两部分数据发送给不同的进程，
-    递归的进行这个过程，直到数据有序为止。
-    */
+// Function to select the pivot based on the chosen strategy
+int select_pivot(int *array, int start, int end, int strategy, MPI_Comm comm) {
+    int local_size = end - start + 1;
+    int *local_medians = (int *)malloc(local_size * sizeof(int));
 
-    // Scatter data to all processes
-    local_n = n / p;
-    local_data = (int *)malloc(local_n * sizeof(int));
-    MPI_Scatter(arr, local_n, MPI_INT, local_data, local_n, MPI_INT, 0, comm);
-
-    // Local sort
-    qsort(local_data, local_n, sizeof(int), compare);
-
-    // Gather all pivots to process 0
-    all_pivots = (int *)malloc(p * sizeof(int));
-    pivots = (int *)malloc((p - 1) * sizeof(int));
-    MPI_Gather(&local_data[local_n / 2], 1, MPI_INT, all_pivots, 1, MPI_INT, 0, comm);
-
-    // Select pivot based on strategy
-    if (my_rank == 0) {
-        qsort(all_pivots, p, sizeof(int), compare);
-        switch (pivot_strategy) {
-            case 1:
-                pivot = all_pivots[rand() % p]; // Random pivot strategy
-                break;
-            case 2:
-                pivot = all_pivots[p / 2]; // Median of medians pivot strategy
-                break;
-            case 3:{
-                int sum = 0;
-                for (int i = 0; i < p; i++) {
-                    sum += all_pivots[i];
-                }
-                pivot = sum / p;
-                break;
-            }
-            default:
-                pivot = all_pivots[p / 2]; // Default to median of medians
-                break;
-        }
+    // Collect local medians
+    for (int i = start; i <= end; i++) {
+        local_medians[i - start] = array[i];
     }
+
+    // Sort local medians
+    local_quicksort(local_medians, 0, local_size - 1);
+
+    int global_median = 0;
+
+    if (strategy == 1) {
+        // Strategy 1: Randomly select one local median as global pivot
+        int random_index = start + rand() % local_size;
+        global_median = local_medians[random_index - start];
+    } else if (strategy == 2) {
+        // Strategy 2: Select median of all local medians as global pivot
+        global_median = local_medians[local_size / 2];
+    } else if (strategy == 3) {
+        // Strategy 3: Select mean value of all local medians as global pivot
+        int sum = 0;
+        for (int i = 0; i < local_size; i++) {
+            sum += local_medians[i];
+        }
+        global_median = sum / local_size;
+    }
+
+    free(local_medians);
+
+    return global_median;
+}
+
+// Parallel quicksort implementation
+void parallel_quicksort(int *array, int start, int end, int pivot_strategy, MPI_Comm comm) {
+    int size, rank;
+    MPI_Comm_size(comm, &size);
+    MPI_Comm_rank(comm, &rank);
+
+    if (size == 1) {
+        local_quicksort(array, start, end);
+        return;
+    }
+
+    int pivot;
+    if (rank == 0) {
+        // Choose pivot based on the selected strategy
+        pivot = select_pivot(array, start, end, pivot_strategy, comm);
+    }
+
+    // Broadcast pivot to all processes
     MPI_Bcast(&pivot, 1, MPI_INT, 0, comm);
 
-    // Partition local data based on pivot
-    int i = 0, j = local_n - 1;
+    // Partition the array based on the pivot
+    int i = start, j = end;
     while (i <= j) {
-        while (local_data[i] < pivot)
+        while (array[i] < pivot) {
             i++;
-        while (local_data[j] > pivot)
+        }
+        while (array[j] > pivot) {
             j--;
+        }
         if (i <= j) {
-            swap(&local_data[i], &local_data[j]);
+            // Swap elements
+            int temp = array[i];
+            array[i] = array[j];
+            array[j] = temp;
             i++;
             j--;
         }
     }
 
-    // Calculate split point for data exchange
-    int split = i;
+    // Create subgroups
+    MPI_Comm new_comm;
+    MPI_Comm_split(comm, (array[start] <= pivot), rank, &new_comm);
 
-    // Exchange data between processes based on pivot
-    int color = (my_rank >= split) ? 1 : 0;
-    MPI_Comm split_comm;
-    MPI_Comm_split(comm, color, my_rank, &split_comm);
+    int new_size, new_rank;
+    MPI_Comm_size(new_comm, &new_size);
+    MPI_Comm_rank(new_comm, &new_rank);
 
-    // Recursively sort subgroups
-    if (my_rank < split) {
-        parallel_quicksort(local_data, split, my_rank, p, split_comm, pivot_strategy);
-    } else {
-        parallel_quicksort(&local_data[split], local_n - split, my_rank - split, p, split_comm, pivot_strategy);
+    // Recursively sort the subgroups
+    if (new_rank != MPI_UNDEFINED) {
+        int mid = i; // Midpoint after partition
+        if (new_rank == 0) {
+            parallel_quicksort(array, start, mid - 1, pivot_strategy, new_comm);
+        } else {
+            parallel_quicksort(array, mid, end, pivot_strategy, new_comm);
+        }
     }
 
-    // Gather sorted data back to process 0
-    MPI_Gather(local_data, local_n, MPI_INT, arr, local_n, MPI_INT, 0, comm);
-
-    // Clean up
-    free(local_data);
-    free(all_pivots);
-    free(pivots);
+    MPI_Comm_free(&new_comm);
 }
 
 int main(int argc, char *argv[]) {
-    int my_rank, p;
-    int *data;
-    int n;
-    double start_time, end_time;
-    int pivot_strategy;
-
     MPI_Init(&argc, &argv);
-    MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
-    MPI_Comm_size(MPI_COMM_WORLD, &p);
 
     if (argc < 4) {
-        if (my_rank == 0) {
-            printf("Usage: %s <input_file> <output_file> <pivot_strategy>\n", argv[0]);
-        }
-        MPI_Finalize();
-        return 1;
+        fprintf(stderr, "Usage: %s <input_file> <output_file> <pivot_strategy>\n", argv[0]);
+        MPI_Abort(MPI_COMM_WORLD, 1);
     }
 
-    char input_filename[MAX_FILENAME_LENGTH];
-    char output_filename[MAX_FILENAME_LENGTH];
-    strcpy(input_filename, argv[1]);
-    strcpy(output_filename, argv[2]);
-    pivot_strategy = atoi(argv[3]);
+    char *input_file = argv[1];
+    char *output_file = argv[2];
+    int pivot_strategy = atoi(argv[3]);
 
-    // Process 0 reads input data from file
-    if (my_rank == 0) {
-        FILE *file = fopen(input_filename, "r");
-        if (!file) {
-            printf("Error: Unable to open input file.\n");
-            MPI_Finalize();
-            return 1;
+    int size, rank;
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
+    if ((size & (size - 1)) != 0) {
+        if (rank == 0) {
+            fprintf(stderr, "Number of processes must be a power of two.\n");
         }
-        fscanf(file, "%d", &n);
+        MPI_Abort(MPI_COMM_WORLD, 1);
+    }
+
+    int n, *data = NULL;
+
+    if (rank == 0) {
+        FILE *fp = fopen(input_file, "r");
+        if (fp == NULL) {
+            fprintf(stderr, "Error: Unable to open input file.\n");
+            MPI_Abort(MPI_COMM_WORLD, 1);
+        }
+
+        fscanf(fp, "%d", &n);
         data = (int *)malloc(n * sizeof(int));
+
         for (int i = 0; i < n; i++) {
-            fscanf(file, "%d", &data[i]);
+            fscanf(fp, "%d", &data[i]);
         }
-        fclose(file);
+
+        fclose(fp);
     }
+
+    double start_time = MPI_Wtime();
 
     // Broadcast the number of elements to all processes
     MPI_Bcast(&n, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
-    // Allocate memory for local data
-    int local_n = n / p;
-    int *local_data = (int *)malloc(local_n * sizeof(int));
-
-    // Scatter data to all processes
-    MPI_Scatter(data, local_n, MPI_INT, local_data, local_n, MPI_INT, 0, MPI_COMM_WORLD);
-
-    // Measure sorting time (excluding file I/O)
-    start_time = MPI_Wtime();
-
-    // Perform parallel quicksort
-    parallel_quicksort(local_data, local_n, my_rank, p, MPI_COMM_WORLD, pivot_strategy);
-
-    end_time = MPI_Wtime();
-
-    // Gather sorted data back to process 0
-    MPI_Gather(local_data, local_n, MPI_INT, data, local_n, MPI_INT, 0, MPI_COMM_WORLD);
-
-    // Output sorted data to file by process 0
-    if (my_rank == 0) {
-        FILE *file = fopen(output_filename, "w");
-        if (!file) {
-            printf("Error: Unable to open output file.\n");
-            MPI_Finalize();
-            return 1;
-        }
-        fprintf(file, "%d\n", n);
-        for (int i = 0; i < n; i++) {
-            fprintf(file, "%d ", data[i]);
-        }
-        fclose(file);
-
-        // Print sorting time
-        printf("%.6f\n", end_time - start_time);
+    if (data == NULL) {
+        data = (int *)malloc(n * sizeof(int));
     }
 
-    // Clean up
+    // Scatter the data to all processes
+    MPI_Scatter(data, n / size, MPI_INT, data, n / size, MPI_INT, 0, MPI_COMM_WORLD);
+
+    // Perform parallel quicksort
+    parallel_quicksort(data, 0, n / size - 1, pivot_strategy, MPI_COMM_WORLD);
+
+    // Gather sorted data
+    MPI_Gather(data, n / size, MPI_INT, data, n / size, MPI_INT, 0, MPI_COMM_WORLD);
+
+    if (rank == 0) {
+        FILE *fp = fopen(output_file, "w");
+        if (fp == NULL) {
+            fprintf(stderr, "Error: Unable to open output file.\n");
+            MPI_Abort(MPI_COMM_WORLD, 1);
+        }
+
+        for (int i = 0; i < n; i++) {
+            fprintf(fp, "%d ", data[i]);
+        }
+        fclose(fp);
+
+        // Calculate sorting time
+        double end_time = MPI_Wtime();
+        printf("Sorting time: %.6f seconds\n", end_time - start_time);
+    }
+
     free(data);
-    free(local_data);
     MPI_Finalize();
 
     return 0;
