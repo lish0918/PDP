@@ -6,11 +6,17 @@ CC = mpicc
 CFLAGS = -std=c99 -g -O3
 LIBS = -lm
 
-BIN = stencil
+BIN = quicksort
 
 all: $(BIN)
 
 qs: qs.c
+	$(CC) $(CFLAGS) -o $@ $< $(LIBS)
+
+quicksort: quicksort.c
+	$(CC) $(CFLAGS) -o $@ $< $(LIBS)
+
+reverse: reverse.c
 	$(CC) $(CFLAGS) -o $@ $< $(LIBS)
 	
 clean:

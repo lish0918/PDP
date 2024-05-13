@@ -100,7 +100,7 @@ int main(int argc, char** argv) {
         if (!fp) {
             fprintf(stderr, "Failed to open file %s\n", argv[1]);
             MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
-            return 1;  // Adding return here to indicate failure clearly
+            return 1;
         }
         fscanf(fp, "%d", &n);
         data = (int *)malloc(n * sizeof(int));
@@ -108,7 +108,7 @@ int main(int argc, char** argv) {
             fprintf(stderr, "Memory allocation failed\n");
             fclose(fp);
             MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
-            return 1;  // Ensure to exit after freeing resources
+            return 1;
         }
         for (int i = 0; i < n; i++) {
             fscanf(fp, "%d", &data[i]);
@@ -117,21 +117,34 @@ int main(int argc, char** argv) {
     }
     MPI_Bcast(&n, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
-    int chunk_size = n / p;
+    int remainder = n % p;
+    int chunk_size = n / p + (id < remainder ? 1 : 0);
     chunk = (int *)malloc(chunk_size * sizeof(int));
-    MPI_Scatter(data, chunk_size, MPI_INT, chunk, chunk_size, MPI_INT, 0, MPI_COMM_WORLD);
+
+    int *sendcounts = (int *)malloc(p * sizeof(int));
+    int *displs = (int *)malloc(p * sizeof(int));
+
+    // 计算每个进程接收的数据量和偏移量
+    for (int i = 0; i < p; i++) {
+        sendcounts[i] = (i < remainder) ? (n / p + 1) : (n / p);
+        displs[i] = (i > 0) ? (displs[i - 1] + sendcounts[i - 1]) : 0;
+    }
+
+    MPI_Scatterv(data, sendcounts, displs, MPI_INT, chunk, chunk_size, MPI_INT, 0, MPI_COMM_WORLD);
 
     int global_pivot = calculate_pivot(chunk, chunk_size, id, p, pivot_strategy, MPI_COMM_WORLD);
     double start_time = MPI_Wtime();
     quicksort(chunk, 0, chunk_size - 1, id, p, pivot_strategy, MPI_COMM_WORLD);
     double end_time = MPI_Wtime();
 
-    if(id == 0){
-        printf("time:%lf \n", end_time-start_time);
+    if (id == 0) {
+        printf("Time taken for sorting: %lf seconds\n", end_time - start_time);
     }
-    // Tree-based merge
+
+    // 树形合并阶段
     int step = 1;
     MPI_Status status;
+
     while (step < p) {
         if (id % (2 * step) == 0) {
             int sender = id + step;
@@ -148,14 +161,16 @@ int main(int argc, char** argv) {
             }
         } else {
             int receiver = id - step;
-            MPI_Send(&chunk_size, 1, MPI_INT, receiver, 0, MPI_COMM_WORLD);
-            MPI_Send(chunk, chunk_size, MPI_INT, receiver, 0, MPI_COMM_WORLD);
-            break;
+            if (receiver >= 0) {
+                MPI_Send(&chunk_size, 1, MPI_INT, receiver, 0, MPI_COMM_WORLD);
+                MPI_Send(chunk, chunk_size, MPI_INT, receiver, 0, MPI_COMM_WORLD);
+                break; // 结束合并阶段
+            }
         }
         step *= 2;
     }
 
-    // Final output at root
+    // 将排序后的结果输出到文件
     if (id == 0) {
         FILE *fo = fopen(argv[2], "w");
         if (!fo) {
@@ -170,12 +185,13 @@ int main(int argc, char** argv) {
     }
 
     free(chunk);
+    free(sendcounts);
+    free(displs);
     if (id == 0) {
         free(data);
     }
 
     MPI_Finalize();
-    //print time
 
     return 0;
 }

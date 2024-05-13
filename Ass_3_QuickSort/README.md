@@ -1,12 +1,13 @@
 # QuickSort
 
-[快排原理](https://blog.csdn.net/qq_39181839/article/details/109478094)，时间复杂度O(nlogn)
+- [快排原理](https://blog.csdn.net/qq_39181839/article/details/109478094)，时间复杂度O(nlogn)
+- [MPI使用](https://stackoverflow.com/questions/36249371/mpi-quicksort-program)
 
 ### directory
 cd ../../../../../../proj/uppmax2024-2-9/nobackup/A3
 
 ### run it
-mpirun -np 1 ./qs ../../../../../../../proj/uppmax2024-2-9/nobackup/A3/inputs/input10.txt result.txt 2
+mpirun -np 4 ./quicksort ../../../../../../../proj/uppmax2024-2-9/nobackup/A3/inputs/input10.txt result.txt 2
 
 ### store
 - ls inputs
