@@ -2,32 +2,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-void swap(int* a, int* b) {
-    int t = *a;
-    *a = *b;
-    *b = t;
-}
-
 int compare(const void* a, const void* b) {
     return (*(int*)a - *(int*)b);
-}
-
-int partition(int arr[], int low, int high, int pivot) {
-    int i = low - 1;
-    for (int j = low; j <= high; j++) {
-        if (arr[j] < pivot) {
-            i++;
-            swap(&arr[i], &arr[j]);
-        }
-    }
-    int pivotIndex = i + 1;
-    for (int j = pivotIndex; j <= high; j++) {
-        if (arr[j] == pivot) {
-            swap(&arr[pivotIndex], &arr[j]);
-            break;
-        }
-    }
-    return pivotIndex;
 }
 
 int calculate_pivot(int *chunk, int chunk_size, int id, int p, int pivot_strategy, MPI_Comm comm) {
@@ -35,8 +11,7 @@ int calculate_pivot(int *chunk, int chunk_size, int id, int p, int pivot_strateg
     qsort(chunk, chunk_size, sizeof(int), compare);
     median = (chunk_size % 2 == 0) ? (chunk[chunk_size / 2 - 1] + chunk[chunk_size / 2]) / 2 : chunk[chunk_size / 2];
 
-    if (pivot_strategy == 1) {
-        // Strategy 1: Local median as pivot (if used directly in partitioning)
+    if (pivot_strategy == 1) { 
         final_pivot = median;
     } else {
         int *medians = NULL;
@@ -56,17 +31,7 @@ int calculate_pivot(int *chunk, int chunk_size, int id, int p, int pivot_strateg
         }
         MPI_Bcast(&final_pivot, 1, MPI_INT, 0, comm); 
     }
-
     return final_pivot;
-}
-
-void quicksort(int arr[], int low, int high, int id, int p, int pivot_strategy, MPI_Comm comm) {
-    if (low < high) {
-        int pivot = calculate_pivot(arr + low, high - low + 1, id, p, pivot_strategy, comm);
-        int pi = partition(arr, low, high, pivot);
-        quicksort(arr, low, pi - 1, id, p, pivot_strategy, comm);
-        quicksort(arr, pi + 1, high, id, p, pivot_strategy, comm);
-    }
 }
 
 int* merge(int *v1, int n1, int *v2, int n2) {
@@ -79,6 +44,20 @@ int* merge(int *v1, int n1, int *v2, int n2) {
     while (i < n1) result[k++] = v1[i++];
     while (j < n2) result[k++] = v2[j++];
     return result;
+}
+
+void exchange_chunks(int *chunk, int size, int low, int high, int pair, int tag, MPI_Comm comm, int *new_size, int **new_chunk) {
+    MPI_Status status;
+    MPI_Request request_send, request_recv;
+    
+    MPI_Isend(chunk + low, high, MPI_INT, pair, tag, comm, &request_send);
+    MPI_Probe(pair, 1 - tag, comm, &status);
+    MPI_Get_count(&status, MPI_INT, new_size);
+    *new_chunk = (int *)malloc(*new_size * sizeof(int));
+    MPI_Irecv(*new_chunk, *new_size, MPI_INT, pair, 1 - tag, comm, &request_recv);
+
+    MPI_Wait(&request_send, &status);
+    MPI_Wait(&request_recv, &status);
 }
 
 int main(int argc, char** argv) {
@@ -119,54 +98,101 @@ int main(int argc, char** argv) {
     MPI_Bcast(&n, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
     int chunk_size = n / p;
-    chunk = (int *)malloc(chunk_size * sizeof(int));
-    MPI_Scatter(data, chunk_size, MPI_INT, chunk, chunk_size, MPI_INT, 0, MPI_COMM_WORLD);
-    int rest_size = chunk_size + n % p;
-    if (rest_size > chunk_size){
-        if(id == 0){
-            MPI_Send(data+(n-rest_size),rest_size,MPI_INT, p-1, 0, MPI_COMM_WORLD);
-        }
-        if(id == p - 1){
-            free(chunk);
-            chunk_size = rest_size;
-            chunk = (int *)malloc(chunk_size * sizeof(int));
-            MPI_Recv(chunk, chunk_size, MPI_INT, 0, 0, MPI_COMM_WORLD, &status);
-        }
+    int remainder = n % p;
+    int *send_counts = (int *)malloc(p * sizeof(int));
+    int *displacements = (int *)malloc(p * sizeof(int));
+
+    for (int i = 0; i < p; i++) {
+        send_counts[i] = (i < remainder) ? (chunk_size + 1) : chunk_size;
+        displacements[i] = (i > 0) ? (displacements[i - 1] + send_counts[i - 1]) : 0;
     }
 
-    int global_pivot = calculate_pivot(chunk, chunk_size, id, p, pivot_strategy, MPI_COMM_WORLD);
+    chunk = (int *)malloc(send_counts[id] * sizeof(int));
+    MPI_Scatterv(data, send_counts, displacements, MPI_INT, chunk, send_counts[id], MPI_INT, 0, MPI_COMM_WORLD);
+
     double start_time = MPI_Wtime();
 
-    if(p > 1)
-        quicksort(chunk, 0, chunk_size - 1, id, p, pivot_strategy, MPI_COMM_WORLD);
+    int group_size = p;
+    int group_id = id;
+    int pivot;
+    MPI_Comm comm = MPI_COMM_WORLD;
 
+    while (group_size > 1) {
+        pivot = calculate_pivot(chunk, chunk_size, group_id, group_size, pivot_strategy, comm);
+
+        int pivotIndex = chunk_size / 2;
+        while (pivotIndex > 0 && chunk[pivotIndex] >= pivot) {
+            pivotIndex--;
+        }
+        int low = pivotIndex;
+        int high = chunk_size - pivotIndex;
+
+        int pair;
+        if (group_id < group_size / 2) {
+            pair = group_id + group_size / 2;
+        } else {
+            pair = group_id - group_size / 2;
+        }
+
+        int new_size;
+        int *new_chunk = NULL;
+        
+        if (group_id < group_size / 2) {
+            exchange_chunks(chunk, chunk_size, low, high, pair, 0, comm, &new_size, &new_chunk);
+        } else {
+            exchange_chunks(chunk, chunk_size, 0, low, pair, 1, comm, &new_size, &new_chunk);
+        }
+
+        if (group_id < group_size / 2) {
+            chunk_size = low + new_size;
+            temp = merge(chunk, low, new_chunk, new_size);
+        } else {
+            chunk_size = high + new_size;
+            temp = merge(chunk + low, high, new_chunk, new_size);
+        }
+
+        free(chunk);
+        chunk = temp;
+
+        MPI_Comm newcomm;
+        MPI_Comm_split(comm, group_id < group_size / 2, group_id, &newcomm);
+        MPI_Comm_rank(newcomm, &group_id);
+        MPI_Comm_size(newcomm, &group_size);
+        comm = newcomm;
+
+        free(new_chunk);
+    }
+  
     double end_time = MPI_Wtime();
     if(id == 0){
-        printf("time:%lf \n", end_time-start_time);
+        printf("time: %lf \n", end_time - start_time);
     }
     
-    // Merge
-    MPI_Request request_final;
-    MPI_Status status_final;
-    int *final_chunk = NULL;
-    if (id != 0) {
-        MPI_Isend(chunk, chunk_size, MPI_INT, 0, id, MPI_COMM_WORLD, &request_final);
-    }
-    else {
-        final_chunk = (int *)malloc(n * sizeof(int));
-        int buffer_size = 0;
-        int current_loc = 0;
-        MPI_Isend(chunk, chunk_size, MPI_INT, 0, id, MPI_COMM_WORLD, &request_final);
-        for (int i = 0; i < p; i++) {
-            MPI_Probe(i, i, MPI_COMM_WORLD, &status_final);
-            MPI_Get_count(&status_final, MPI_INT, &buffer_size);
-            MPI_Recv(final_chunk + current_loc, buffer_size, MPI_INT, i, i, MPI_COMM_WORLD, &status_final);
-            current_loc += buffer_size;
+    // Tree-based merge
+    int step = 1;
+    while (step < p) {
+        if (id % (2 * step) == 0) {
+            int sender = id + step;
+            if (sender < p) {
+                int new_size;
+                MPI_Recv(&new_size, 1, MPI_INT, sender, 0, MPI_COMM_WORLD, &status);
+                other = (int *)malloc(new_size * sizeof(int));
+                MPI_Recv(other, new_size, MPI_INT, sender, 0, MPI_COMM_WORLD, &status);
+                temp = merge(chunk, chunk_size, other, new_size);
+                free(chunk);
+                free(other);
+                chunk = temp;
+                chunk_size += new_size;
+            }
+        } else {
+            int receiver = id - step;
+            MPI_Send(&chunk_size, 1, MPI_INT, receiver, 0, MPI_COMM_WORLD);
+            MPI_Send(chunk, chunk_size, MPI_INT, receiver, 0, MPI_COMM_WORLD);
+            break;
         }
+        step *= 2;
     }
-    printf("test");
 
-    // Final output at root
     if (id == 0) {
         FILE *fo = fopen(argv[2], "w");
         if (!fo) {
@@ -174,11 +200,10 @@ int main(int argc, char** argv) {
             MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
         }
         for (int i = 0; i < chunk_size; i++) {
-            fprintf(fo, "%d ", final_chunk[i]);
+            fprintf(fo, "%d ", chunk[i]);
         }
         fprintf(fo, "\n");
         fclose(fo);
-        free(final_chunk);
     }
 
     free(chunk);
