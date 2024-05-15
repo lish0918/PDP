@@ -21,7 +21,7 @@ for strategy in [1, 2, 3]:
     ax.plot(process_numbers, strategy_efficiency, marker='o', label=label)
 
 # 设置图表标题和标签
-ax.set_title('Weak Scaling Efficiency vs. Process Number for Different Strategies')
+ax.set_title('Weak Scalability')
 ax.set_xlabel('Process Number')
 ax.set_ylabel('Efficiency')
 

@@ -42,7 +42,7 @@ process_numbers3_descending = data['Process_Number'][15:18]
 ax.plot(process_numbers3_descending, strategy3_descending, marker='o', linestyle='--', label='Strategy 3 - Descending Order')
 
 # 设置图表标题和标签
-ax.set_title('Speedup vs. Process Number for Different Strategies and Orders')
+ax.set_title('Descending Order vs Original Order')
 ax.set_xlabel('Process Number')
 ax.set_ylabel('Speedup')
 

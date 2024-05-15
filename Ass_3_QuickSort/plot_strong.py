@@ -25,7 +25,7 @@ for name, start_idx in zip(['Strategy 1', 'Strategy 2', 'Strategy 3'], [0, 5, 10
 ax.plot(data['Process_Number'][:5], ideal_speedup[:5], linestyle='--', label='Ideal Speedup')
 
 # 设置图表标题和标签
-ax.set_title('Speedup vs. Process Number for Different Strategies')
+ax.set_title('Strong Scalability')
 ax.set_xlabel('Number of Threads (Process Number)')
 ax.set_ylabel('Speedup')
 ax.legend()
