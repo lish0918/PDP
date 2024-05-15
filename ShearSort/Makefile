@@ -1,16 +1,16 @@
 ###############################################################################
-# Makefile for assignment 3, Parallel and Distributed Computing.
+# Makefile for Project, Parallel and Distributed Computing.
 ###############################################################################
 
 CC = mpicc
 CFLAGS = -std=c99 -g -O3
 LIBS = -lm
 
-BIN = quicksort
+BIN = shearsort
 
 all: $(BIN)
 
-quicksort: quicksort.c
+shearsort: shearsort.c
 	$(CC) $(CFLAGS) -o $@ $< $(LIBS)
 	
 clean:
