@@ -108,92 +108,103 @@ int main(int argc, char** argv) {
     }
 
     chunk = (int *)malloc(send_counts[id] * sizeof(int));
+    //printf("id: %d, chunk_size: %d\n", id, send_counts[id]);
     MPI_Scatterv(data, send_counts, displacements, MPI_INT, chunk, send_counts[id], MPI_INT, 0, MPI_COMM_WORLD);
+    //printf("After Scatter id: %d, chunk_size: %d\n", id, chunk_size);
 
     double start_time = MPI_Wtime();
+    double max_time = 0.0;
 
-    int group_size = p;
-    int group_id = id;
-    int pivot;
-    MPI_Comm comm = MPI_COMM_WORLD;
-
-    while (group_size > 1) {
-        pivot = calculate_pivot(chunk, chunk_size, group_id, group_size, pivot_strategy, comm);
-
-        int pivotIndex = chunk_size / 2;
-        while (pivotIndex > 0 && chunk[pivotIndex] >= pivot) {
-            pivotIndex--;
-        }
-        int low = pivotIndex;
-        int high = chunk_size - pivotIndex;
-
-        int pair;
-        if (group_id < group_size / 2) {
-            pair = group_id + group_size / 2;
-        } else {
-            pair = group_id - group_size / 2;
-        }
-
-        int new_size;
-        int *new_chunk = NULL;
-        
-        if (group_id < group_size / 2) {
-            exchange_chunks(chunk, chunk_size, low, high, pair, 0, comm, &new_size, &new_chunk);
-        } else {
-            exchange_chunks(chunk, chunk_size, 0, low, pair, 1, comm, &new_size, &new_chunk);
-        }
-
-        if (group_id < group_size / 2) {
-            chunk_size = low + new_size;
-            temp = merge(chunk, low, new_chunk, new_size);
-        } else {
-            chunk_size = high + new_size;
-            temp = merge(chunk + low, high, new_chunk, new_size);
-        }
-
-        free(chunk);
-        chunk = temp;
-
-        MPI_Comm newcomm;
-        MPI_Comm_split(comm, group_id < group_size / 2, group_id, &newcomm);
-        MPI_Comm_rank(newcomm, &group_id);
-        MPI_Comm_size(newcomm, &group_size);
-        comm = newcomm;
-
-        free(new_chunk);
+    if (p = 1){
+        qsort(chunk, chunk_size, sizeof(int), compare);
+        max_time = MPI_Wtime() - start_time;
     }
-  
-    double end_time = MPI_Wtime();
-    if(id == 0){
-        printf("time: %lf \n", end_time - start_time);
-    }
-    
-    // Tree-based merge
-    int step = 1;
-    while (step < p) {
-        if (id % (2 * step) == 0) {
-            int sender = id + step;
-            if (sender < p) {
-                int new_size;
-                MPI_Recv(&new_size, 1, MPI_INT, sender, 0, MPI_COMM_WORLD, &status);
-                other = (int *)malloc(new_size * sizeof(int));
-                MPI_Recv(other, new_size, MPI_INT, sender, 0, MPI_COMM_WORLD, &status);
-                temp = merge(chunk, chunk_size, other, new_size);
-                free(chunk);
-                free(other);
-                chunk = temp;
-                chunk_size += new_size;
+    else{
+        int group_size = p;
+        int group_id = id;
+        int pivot;
+        MPI_Comm comm = MPI_COMM_WORLD;
+
+        while (group_size > 1) {
+            pivot = calculate_pivot(chunk, chunk_size, group_id, group_size, pivot_strategy, comm);
+
+            int pivotIndex = chunk_size / 2;
+            while (pivotIndex > 0 && chunk[pivotIndex] >= pivot) {
+                pivotIndex--;
             }
-        } else {
-            int receiver = id - step;
-            MPI_Send(&chunk_size, 1, MPI_INT, receiver, 0, MPI_COMM_WORLD);
-            MPI_Send(chunk, chunk_size, MPI_INT, receiver, 0, MPI_COMM_WORLD);
-            break;
+            int low = pivotIndex;
+            int high = chunk_size - pivotIndex;
+
+            int pair;
+            if (group_id < group_size / 2) {
+                pair = group_id + group_size / 2;
+            } else {
+                pair = group_id - group_size / 2;
+            }
+
+            int new_size;
+            int *new_chunk = NULL;
+            
+            if (group_id < group_size / 2) {
+                exchange_chunks(chunk, chunk_size, low, high, pair, 0, comm, &new_size, &new_chunk);
+            } else {
+                exchange_chunks(chunk, chunk_size, 0, low, pair, 1, comm, &new_size, &new_chunk);
+            }
+
+            if (group_id < group_size / 2) {
+                chunk_size = low + new_size;
+                temp = merge(chunk, low, new_chunk, new_size);
+            } else {
+                chunk_size = high + new_size;
+                temp = merge(chunk + low, high, new_chunk, new_size);
+            }
+
+            free(chunk);
+            chunk = temp;
+
+            MPI_Comm newcomm;
+            MPI_Comm_split(comm, group_id < group_size / 2, group_id, &newcomm);
+            MPI_Comm_rank(newcomm, &group_id);
+            MPI_Comm_size(newcomm, &group_size);
+            comm = newcomm;
+
+            free(new_chunk);
         }
-        step *= 2;
+
+        double end_time = MPI_Wtime();
+        double elapsed_time = end_time - start_time;
+        // The maximum time taken by any process
+        MPI_Allreduce(&elapsed_time, &max_time, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
+        
+        // Tree-based merge
+        int step = 1;
+        while (step < p) {
+            if (id % (2 * step) == 0) {
+                int sender = id + step;
+                if (sender < p) {
+                    int new_size;
+                    MPI_Recv(&new_size, 1, MPI_INT, sender, 0, MPI_COMM_WORLD, &status);
+                    other = (int *)malloc(new_size * sizeof(int));
+                    MPI_Recv(other, new_size, MPI_INT, sender, 0, MPI_COMM_WORLD, &status);
+                    temp = merge(chunk, chunk_size, other, new_size);
+                    free(chunk);
+                    free(other);
+                    chunk = temp;
+                    chunk_size += new_size;
+                }
+            } else {
+                int receiver = id - step;
+                MPI_Send(&chunk_size, 1, MPI_INT, receiver, 0, MPI_COMM_WORLD);
+                MPI_Send(chunk, chunk_size, MPI_INT, receiver, 0, MPI_COMM_WORLD);
+                break;
+            }
+            step *= 2;
+        }
     }
 
     if (id == 0) {
+        printf("Elapsed time: %f\n", max_time);
+
         FILE *fo = fopen(argv[2], "w");
         if (!fo) {
             fprintf(stderr, "Failed to open file %s\n", argv[2]);
