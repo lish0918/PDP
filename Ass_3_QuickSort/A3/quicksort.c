@@ -96,6 +96,14 @@ int main(int argc, char** argv) {
         }
         fclose(fp);
     }
+    // print the input data
+    //if (id == 0) {
+    //    for (int i = 0; i < n; i++) {
+    //       printf("%lld ", data[i]);
+    //    }
+    //    printf("\n");
+    //}
+
     MPI_Bcast(&n, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
     chunk_size = n / p;

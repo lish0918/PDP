@@ -1,14 +1,15 @@
 #!/bin/bash
 
 #SBATCH -A uppmax2024-2-9
+#SBATCH -M snowy
 #SBATCH -p core -n 4
-#SBATCH -t 5:00
+#SBATCH -t 00:10:00
 #SBATCH -J A3-check
 
 ################################################################################
 # Unpack the file A3.tar.gz (which should be on the format specified in
 # the instructions of Assignment 3 in Parallel and Distributed
-# Programming spring 2023). Check that the required files exist and can be built
+# Programming spring 2024). Check that the required files exist and can be built
 # respectively. Run the binary with different input on different number of
 # processes. Exit with exit code 1 if the tar file structure is not the required
 # one or the program computes the wrong result. Then also print a message saying
@@ -40,6 +41,8 @@ if [ 1 != "$binary" ]; then
 fi
 echo "OK"
 
+pwd
+
 # Check the output of the program
 data_dir=/proj/uppmax2024-2-9/nobackup/A3/inputs
 output_file="output_to_remove.txt"
@@ -50,10 +53,10 @@ commands=(
 	"./quicksort ${data_dir}/input3.txt ${output_file} 3"
 )
 expected_output=(
-	"^\s*596516649\s+783368690\s+1025202362\s+1102520059\s+1189641421\s+1350490027\s+1365180540\s+1540383426\s+1967513926\s+2044897763\s*$"
-	"^\s*596516649\s+783368690\s+1025202362\s+1102520059\s+1189641421\s+1350490027\s+1365180540\s+1540383426\s+1967513926\s+2044897763\s*$"
-	"^\s*596516649\s+783368690\s+1025202362\s+1102520059\s+1189641421\s+1350490027\s+1365180540\s+1540383426\s+1967513926\s+2044897763\s*$"
-	"^\s*161\s+532\s+9087\s*$"
+	"^\s*35005211\s+294702567\s+304089172\s+521595368\s+1303455736\s+1365180540\s+1540383426\s+1726956429\s+1967513926\s+2044897763\s*$"
+	"^\s*35005211\s+294702567\s+304089172\s+521595368\s+1303455736\s+1365180540\s+1540383426\s+1726956429\s+1967513926\s+2044897763\s*$"
+	"^\s*35005211\s+294702567\s+304089172\s+521595368\s+1303455736\s+1365180540\s+1540383426\s+1726956429\s+1967513926\s+2044897763\s*$"
+	"^\s*846930886\s+1681692777\s+1804289383\s*$"
 )
 
 echo "Checking result of serial runs"
