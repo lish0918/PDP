@@ -222,7 +222,7 @@ int main(int argc, char** argv) {
     }
 
     if (id == 0) {
-        printf("Elapsed time: %f\n", max_time);
+        printf("%f\n", max_time);
 
         FILE *fo = fopen(argv[2], "w");
         if (!fo) {
