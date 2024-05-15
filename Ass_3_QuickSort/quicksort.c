@@ -84,6 +84,7 @@ int* merge(int *v1, int n1, int *v2, int n2) {
 int main(int argc, char** argv) {
     int id, p, n, *data, *chunk, *temp, *other;
     MPI_Init(&argc, &argv);
+    MPI_Status status;
     MPI_Comm_rank(MPI_COMM_WORLD, &id);
     MPI_Comm_size(MPI_COMM_WORLD, &p);
 
@@ -100,7 +101,7 @@ int main(int argc, char** argv) {
         if (!fp) {
             fprintf(stderr, "Failed to open file %s\n", argv[1]);
             MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
-            return 1;
+            return 1;  // Adding return here to indicate failure clearly
         }
         fscanf(fp, "%d", &n);
         data = (int *)malloc(n * sizeof(int));
@@ -108,7 +109,7 @@ int main(int argc, char** argv) {
             fprintf(stderr, "Memory allocation failed\n");
             fclose(fp);
             MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
-            return 1;
+            return 1;  // Ensure to exit after freeing resources
         }
         for (int i = 0; i < n; i++) {
             fscanf(fp, "%d", &data[i]);
@@ -117,60 +118,55 @@ int main(int argc, char** argv) {
     }
     MPI_Bcast(&n, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
-    int remainder = n % p;
-    int chunk_size = n / p + (id < remainder ? 1 : 0);
+    int chunk_size = n / p;
     chunk = (int *)malloc(chunk_size * sizeof(int));
-
-    int *sendcounts = (int *)malloc(p * sizeof(int));
-    int *displs = (int *)malloc(p * sizeof(int));
-
-    // 计算每个进程接收的数据量和偏移量
-    for (int i = 0; i < p; i++) {
-        sendcounts[i] = (i < remainder) ? (n / p + 1) : (n / p);
-        displs[i] = (i > 0) ? (displs[i - 1] + sendcounts[i - 1]) : 0;
+    MPI_Scatter(data, chunk_size, MPI_INT, chunk, chunk_size, MPI_INT, 0, MPI_COMM_WORLD);
+    int rest_size = chunk_size + n % p;
+    if (rest_size > chunk_size){
+        if(id == 0){
+            MPI_Send(data+(n-rest_size),rest_size,MPI_INT, p-1, 0, MPI_COMM_WORLD);
+        }
+        if(id == p - 1){
+            free(chunk);
+            chunk_size = rest_size;
+            chunk = (int *)malloc(chunk_size * sizeof(int));
+            MPI_Recv(chunk, chunk_size, MPI_INT, 0, 0, MPI_COMM_WORLD, &status);
+        }
     }
-
-    MPI_Scatterv(data, sendcounts, displs, MPI_INT, chunk, chunk_size, MPI_INT, 0, MPI_COMM_WORLD);
 
     int global_pivot = calculate_pivot(chunk, chunk_size, id, p, pivot_strategy, MPI_COMM_WORLD);
     double start_time = MPI_Wtime();
-    quicksort(chunk, 0, chunk_size - 1, id, p, pivot_strategy, MPI_COMM_WORLD);
+
+    if(p > 1)
+        quicksort(chunk, 0, chunk_size - 1, id, p, pivot_strategy, MPI_COMM_WORLD);
+
     double end_time = MPI_Wtime();
-
-    if (id == 0) {
-        printf("Time taken for sorting: %lf seconds\n", end_time - start_time);
+    if(id == 0){
+        printf("time:%lf \n", end_time-start_time);
     }
-
-    // 树形合并阶段
-    int step = 1;
-    MPI_Status status;
-
-    while (step < p) {
-        if (id % (2 * step) == 0) {
-            int sender = id + step;
-            if (sender < p) {
-                int received_size;
-                MPI_Recv(&received_size, 1, MPI_INT, sender, 0, MPI_COMM_WORLD, &status);
-                other = (int *)malloc(received_size * sizeof(int));
-                MPI_Recv(other, received_size, MPI_INT, sender, 0, MPI_COMM_WORLD, &status);
-                temp = merge(chunk, chunk_size, other, received_size);
-                free(chunk);
-                free(other);
-                chunk = temp;
-                chunk_size += received_size;
-            }
-        } else {
-            int receiver = id - step;
-            if (receiver >= 0) {
-                MPI_Send(&chunk_size, 1, MPI_INT, receiver, 0, MPI_COMM_WORLD);
-                MPI_Send(chunk, chunk_size, MPI_INT, receiver, 0, MPI_COMM_WORLD);
-                break; // 结束合并阶段
-            }
+    
+    // Merge
+    MPI_Request request_final;
+    MPI_Status status_final;
+    int *final_chunk = NULL;
+    if (id != 0) {
+        MPI_Isend(chunk, chunk_size, MPI_INT, 0, id, MPI_COMM_WORLD, &request_final);
+    }
+    else {
+        final_chunk = (int *)malloc(n * sizeof(int));
+        int buffer_size = 0;
+        int current_loc = 0;
+        MPI_Isend(chunk, chunk_size, MPI_INT, 0, id, MPI_COMM_WORLD, &request_final);
+        for (int i = 0; i < p; i++) {
+            MPI_Probe(i, i, MPI_COMM_WORLD, &status_final);
+            MPI_Get_count(&status_final, MPI_INT, &buffer_size);
+            MPI_Recv(final_chunk + current_loc, buffer_size, MPI_INT, i, i, MPI_COMM_WORLD, &status_final);
+            current_loc += buffer_size;
         }
-        step *= 2;
     }
+    printf("test");
 
-    // 将排序后的结果输出到文件
+    // Final output at root
     if (id == 0) {
         FILE *fo = fopen(argv[2], "w");
         if (!fo) {
@@ -178,15 +174,14 @@ int main(int argc, char** argv) {
             MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
         }
         for (int i = 0; i < chunk_size; i++) {
-            fprintf(fo, "%d ", chunk[i]);
+            fprintf(fo, "%d ", final_chunk[i]);
         }
         fprintf(fo, "\n");
         fclose(fo);
+        free(final_chunk);
     }
 
     free(chunk);
-    free(sendcounts);
-    free(displs);
     if (id == 0) {
         free(data);
     }
