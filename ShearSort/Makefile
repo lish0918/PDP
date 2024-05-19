@@ -10,6 +10,9 @@ BIN = shearsort
 
 all: $(BIN)
 
+ss: ss.c
+	$(CC) $(CFLAGS) -o $@ $< $(LIBS)
+
 shearsort: shearsort.c
 	$(CC) $(CFLAGS) -o $@ $< $(LIBS)
 	

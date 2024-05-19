@@ -122,7 +122,7 @@ int main(int argc, char** argv) {
     int rest_size = chunk_size + n % p;
     if (rest_size > chunk_size){
         if (id == 0){
-            MPI_Send(data + (n - rest_size), rest_size, MPI_LONG_LONG, p - 1, 0, MPI_COMM_WORLD);
+            MPI_Send(data + (n - rest_size), rest_size, MPI_LONG_LONG, p - 1, 0, MPI_COMM_WORLD); // send the rest of the data to the last process
         }
         if (id == p - 1){
             free(chunk);
