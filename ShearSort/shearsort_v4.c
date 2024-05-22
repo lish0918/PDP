@@ -140,8 +140,8 @@ int main(int argc, char *argv[]) {
             
              /* ======================================================================
                 * 3. Reorder again to achieve transposition
-                The reverse operation of the second step, redistributing the flattened 
-                content back into blocks.
+                Based on the number of rows per process, the overall matrix transposition 
+                is achieved by reordering according to the corresponding rules.
             ====================================================================== */
             index = 0;
             for (int i = 0; i < local_rows; i++) {
