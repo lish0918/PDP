@@ -40,21 +40,29 @@ int main(int argc, char *argv[]) {
 
     int *sendcounts = (int*)malloc(size * sizeof(int));
     int *displs = (int*)malloc(size * sizeof(int));
+    int *rcounts = (int*)malloc(size * sizeof(int));
+    int *rdispls = (int*)malloc(size * sizeof(int));
     int *rows_per_rank = (int*)malloc(size * sizeof(int));
 
-    /* ============================================
-       * Calculate local_rows for each rank
-    ============================================ */
     int base_rows = n / size;
     int remainder = n % size;
+
+    // Calculate sendcounts and displs for Scatterv
     for (int i = 0; i < size; i++) {
         rows_per_rank[i] = base_rows + (i < remainder ? 1 : 0);
         sendcounts[i] = rows_per_rank[i] * n;
         displs[i] = (i == 0) ? 0 : displs[i-1] + sendcounts[i-1];
     }
-
+    
+    // Allocate memory for local data
     local_rows = rows_per_rank[rank];
     local_data = (int*)malloc(local_rows * n * sizeof(int));
+
+    // Calculate rcounts and rdispls for Alltoallv
+    for (int i = 0; i < size; i++) {
+        rcounts[i] = rows_per_rank[i] * local_rows;
+        rdispls[i] = (i == 0) ? 0 : rdispls[i-1] + rcounts[i-1];
+    }
 
     if (rank == 0) {
         matrix = (int*)malloc(n * n * sizeof(int));
@@ -108,84 +116,59 @@ int main(int argc, char *argv[]) {
             int *temp = (int*)malloc(local_rows * n * sizeof(int));
 
             /* ======================================================================
-                * 1. Transpose the local data block
-                Each process performs an internal transpose on 'size' blocks of size 
-                'local_rows * local_rows' from left to right and stores them in temp.
-            ====================================================================== */
-            for (int i = 0; i < local_rows; i++) {
-                for (int j = 0; j < size; j++) {
-                    for (int k = j * local_rows; k < (j + 1) * local_rows; k++) {
-                        temp[(k % local_rows) * n + i + j * local_rows] = local_data[i * n + k];
-                    }
+                * 1. Reorder the local data for Alltoallv
+                Read data from the first column of the two-dimensional array represented 
+                by the one-dimensional array 'local_data' to the one-dimensional array 
+                'temp' in left-to-right order.
+            ====================================================================== */            
+            int index = 0;
+            for (int col = 0; col < n; col++) {
+                for (int row = 0; row < local_rows; row++) {
+                    temp[index++] = local_data[row * n + col];
                 }
-            }
+            }    
 
             /* ======================================================================
-                * 2. Change to Alltoall Order
-                Flatten the contents of 'size' blocks of size 'local_rows * local_rows' 
-                from left to right into the entire array for 'Alltoall' communication.
-            ====================================================================== */
-            for (int j = 0; j < size; j++) {
-                for (int i = 0; i < local_rows; i++) {
-                    for (int k = j * local_rows; k < (j + 1) * local_rows; k++) {
-                        local_data[(i + j * local_rows) * local_rows + k % local_rows] = temp[i * n + k];
-                    }
-                }
-            }
-            
-            /* ======================================================================
-                * 3. Alltoall Communication
-                Merge the contents of the i-th block of size 'local_rows * local_rows' 
-                from each process's local_data and transmit it to the i-th process's temp.
-            ====================================================================== */
-            MPI_Alltoall(local_data, local_rows * local_rows, MPI_INT, temp, local_rows * local_rows, MPI_INT, MPI_COMM_WORLD);
+                * 2. Alltoallv Communication
+                Merge the contents of the i-th block from each process's 'temp' and 
+                transmit it to the i-th process's 'local_data'.
+            ====================================================================== */            
+            MPI_Alltoallv(temp, rcounts, rdispls, MPI_INT, local_data, rcounts, rdispls, MPI_INT, MPI_COMM_WORLD);                    
             
              /* ======================================================================
-                * 4. Change Back to Normal Order
+                * 3. Reorder again to achieve transposition
                 The reverse operation of the second step, redistributing the flattened 
                 content back into blocks.
             ====================================================================== */
-            for (int j = 0; j < size; j++) {
-                for (int i = 0; i < local_rows; i++) {
-                    for (int k = j * local_rows; k < (j + 1) * local_rows; k++) {
-                        local_data[i * n + k] = temp[(i + j * local_rows) * local_rows + k % local_rows];
+            index = 0;
+            for (int i = 0; i < local_rows; i++) {
+                int max = 0;
+                int t = 0;
+                for (int j = 0; j < size; j++) {
+                    if (j != 0) {
+                        t = rows_per_rank[j - 1];
+                    }
+                    max = max + t * t;
+                    for (int k = max + i * rows_per_rank[j]; k < max + (i + 1) * rows_per_rank[j]; k++) {
+                        temp[index++] = local_data[k];
                     }
                 }
-            }
+            } 
+
+            if (l == 1){
+                printf("Rank %d\n", rank);
+                for (int i = 0; i < local_rows; i++) {
+                    for (int j = 0; j < n; j++) {
+                        printf("%d ", temp[i * n + j]);
+                    }
+                    printf("\n");
+                }
+            }  
 
             // Column-wise sorting
-            for (int i = 0; i < local_rows; i++) {
-                qsort(&local_data[i * n], n, sizeof(int), compare_asc);
-            }
-
-            // Block transposition
-            for (int i = 0; i < local_rows; i++) {
-                for (int j = 0; j < size; j++) {
-                    for (int k = j * local_rows; k < (j + 1) * local_rows; k++) {
-                        temp[(k % local_rows) * n + i + j * local_rows] = local_data[i * n + k];
-                    }
-                }
-            }
-
-            // Change to Alltoall Order
-            for (int j = 0; j < size; j++) {
-                for (int i = 0; i < local_rows; i++) {
-                    for (int k = j * local_rows; k < (j + 1) * local_rows; k++) {
-                        local_data[(i + j * local_rows) * local_rows + k % local_rows] = temp[i * n + k];
-                    }
-                }
-            }
-
-            MPI_Alltoall(local_data, local_rows * local_rows, MPI_INT, temp, local_rows * local_rows, MPI_INT, MPI_COMM_WORLD);
-            
-            // Change Back to Normal Order
-            for (int j = 0; j < size; j++) {
-                for (int i = 0; i < local_rows; i++) {
-                    for (int k = j * local_rows; k < (j + 1) * local_rows; k++) {
-                        local_data[i * n + k] = temp[(i + j * local_rows) * local_rows + k % local_rows];
-                    }
-                }
-            }
+            //for (int i = 0; i < local_rows; i++) {
+            //    qsort(&local_data[i * n], n, sizeof(int), compare_asc);
+            //}
 
             free(temp);
         }
@@ -222,6 +205,11 @@ int main(int argc, char *argv[]) {
     }
 
     free(local_data);
+    free(sendcounts);
+    free(displs);
+    free(rcounts);
+    free(rdispls);
+    free(rows_per_rank);
     MPI_Finalize();
     return 0;
 }

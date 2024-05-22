@@ -2,7 +2,7 @@
     File : shearsort_v2.c
     Situation: Exclude the case when the matrix size is not divisible by the number of processes
     Result: Weak Improvement
-    Processes number 8, speedup around 4 times, no more speedup after 8 processes
+    Processes number 20, speedup around 7 times
 ===========================================================================================*/
 #include <stdio.h>
 #include <stdlib.h>
