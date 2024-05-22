@@ -9,6 +9,10 @@ def write_matrix_to_file(matrix, filename):
         for row in matrix:
             file.write(' '.join(map(str, row)) + '\n')
 
-n = 1000
-matrix = generate_matrix(n)
-write_matrix_to_file(matrix, 'input1000.txt')
+def main():
+    n = 8000
+    matrix = generate_matrix(n)
+    write_matrix_to_file(matrix, '/home/lish6557/local/src/PDP/ShearSort/file/input8000.txt')
+
+if __name__ == "__main__":
+    main()

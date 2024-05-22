@@ -1,8 +1,8 @@
 /* ==========================================================================================
-    File : shearsort_v3.c
-    Situation: Include the case when the matrix size is not divisible by the number of processes
-    Result: 
-    
+    File : shearsort_v2.c
+    Situation: Exclude the case when the matrix size is not divisible by the number of processes
+    Result: Weak Improvement
+    Processes number 8, speedup around 4 times, no more speedup after 8 processes
 ===========================================================================================*/
 #include <stdio.h>
 #include <stdlib.h>
@@ -38,23 +38,22 @@ int main(int argc, char *argv[]) {
     input_filename = argv[2];
     output_filename = argv[3];
 
-    int *sendcounts = (int*)malloc(size * sizeof(int));
-    int *displs = (int*)malloc(size * sizeof(int));
-    int *rows_per_rank = (int*)malloc(size * sizeof(int));
-
     /* ============================================
        * Calculate local_rows for each rank
+       How to make the transposition work if the matrix 
+       is not divisible by the number of processes?
     ============================================ */
-    int base_rows = n / size;
-    int remainder = n % size;
-    for (int i = 0; i < size; i++) {
-        rows_per_rank[i] = base_rows + (i < remainder ? 1 : 0);
-        sendcounts[i] = rows_per_rank[i] * n;
-        displs[i] = (i == 0) ? 0 : displs[i-1] + sendcounts[i-1];
+    local_rows = n / size;
+    local_data = (int*)malloc(local_rows * n * sizeof(int));
+
+    if (rank == 0) {
+        if (n % size != 0) {
+            printf("Error: Matrix size must be divisible by the number of processes\n");
+            MPI_Finalize();
+            return 1;
+        }
     }
 
-    local_rows = rows_per_rank[rank];
-    local_data = (int*)malloc(local_rows * n * sizeof(int));
 
     if (rank == 0) {
         matrix = (int*)malloc(n * n * sizeof(int));
@@ -72,14 +71,14 @@ int main(int argc, char *argv[]) {
 
     start_time = MPI_Wtime();
 
-    MPI_Scatterv(matrix, sendcounts, displs, MPI_INT, local_data, local_rows * n, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Scatter(matrix, local_rows * n, MPI_INT, local_data, local_rows * n, MPI_INT, 0, MPI_COMM_WORLD);
 
     int d = ceil(log2(n));
 
     // Determine sorting order for each rank
     int should_reverse = 0; // Initial should_reverse for rank 0
     for (int i = 0; i < rank; i++) {
-        if (rows_per_rank[i] % 2 != 0) {
+        if (local_rows % 2 != 0) {
             should_reverse = !should_reverse; // Toggle should_reverse if previous rank had odd rows
         }
     }
@@ -191,7 +190,7 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    MPI_Gatherv(local_data, local_rows * n, MPI_INT, matrix, sendcounts, displs, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Gather(local_data, local_rows * n, MPI_INT, matrix, local_rows * n, MPI_INT, 0, MPI_COMM_WORLD);
 
     elapsed_time = MPI_Wtime() - start_time;
     MPI_Reduce(&elapsed_time, &max_time, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
