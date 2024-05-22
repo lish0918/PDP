@@ -1,16 +1,17 @@
 /* ==========================================================================================
-    File : shearsort_v3.c
-    Situation: Include the case when the matrix size is not divisible by the number of processes
-    Result: Fairly Scalability
-    Processes number 10, speedup around 6 times
+    File : shearsort_v4.c
+    Situation: Include the case when the matrix size is not divisible by the number of processes; Use quicksort
+    Result: Kind of Scalability
+    Processes number 10, speedup around 5 times
+    Compared to qsort, it takes less time to execute for 5000 input matrices with 1-20 processes, 
+    but its overall strong and weak scalability is 5% worse.
 ===========================================================================================*/
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
 #include <mpi.h>
 
-int compare_asc(const void *a, const void *b);
-int compare_desc(const void *a, const void *b);
+void quicksort(int *arr, int low, int high, int order);
 int check_sorted(int *matrix, int n);
 
 int main(int argc, char *argv[]) {
@@ -98,16 +99,18 @@ int main(int argc, char *argv[]) {
             if (!should_reverse) {
                 // Reversed order: odd rows descending, even rows ascending
                 if ((i % 2) == 0) {
-                    qsort(&local_data[i * n], n, sizeof(int), compare_asc);
+                    quicksort(&local_data[i * n], 0, n - 1, 1); // Sort in ascending order
+
                 } else {
-                    qsort(&local_data[i * n], n, sizeof(int), compare_desc);
+                    quicksort(&local_data[i * n], 0, n - 1, 0); // Sort in descending order
                 }
             } else {
                 // Regular order: odd rows ascending, even rows descending
                 if ((i % 2) == 0) {
-                    qsort(&local_data[i * n], n, sizeof(int), compare_desc);
+                    quicksort(&local_data[i * n], 0, n - 1, 0); // Sort in descending order
                 } else {
-                    qsort(&local_data[i * n], n, sizeof(int), compare_asc);
+                    quicksort(&local_data[i * n], 0, n - 1, 1); // Sort in ascending order
+
                 }
             }
         }
@@ -157,7 +160,7 @@ int main(int argc, char *argv[]) {
 
             // Column-wise sorting
             for (int i = 0; i < local_rows; i++) {
-                qsort(&temp[i * n], n, sizeof(int), compare_asc);
+                quicksort(&temp[i * n], 0, n - 1, 1); // Sort in ascending order
             }            
 
             // Reorder the local data for Alltoallv
@@ -231,12 +234,37 @@ int main(int argc, char *argv[]) {
     return 0;
 }
 
-int compare_asc(const void *a, const void *b) {
-    return (*(int*)a - *(int*)b);
-}
-
-int compare_desc(const void *a, const void *b) {
-    return (*(int*)b - *(int*)a);
+void quicksort(int *arr, int low, int high, int order) {
+    if (low < high) {
+        int pivot = arr[(low + high) / 2];
+        int i = low - 1;
+        int j = high + 1;
+        while (1) {
+            if (order == 0) {
+                do {
+                    i++;
+                } while (arr[i] > pivot);
+                do {
+                    j--;
+                } while (arr[j] < pivot);
+            } else {
+                do {
+                    i++;
+                } while (arr[i] < pivot);
+                do {
+                    j--;
+                } while (arr[j] > pivot);
+            }
+            if (i >= j) {
+                break;
+            }
+            int temp = arr[i];
+            arr[i] = arr[j];
+            arr[j] = temp;
+        }
+        quicksort(arr, low, j, order);
+        quicksort(arr, j + 1, high, order);
+    }
 }
 
 int check_sorted(int *matrix, int n) {
