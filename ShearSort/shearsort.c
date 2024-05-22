@@ -148,27 +148,44 @@ int main(int argc, char *argv[]) {
                     if (j != 0) {
                         t = rows_per_rank[j - 1];
                     }
-                    max = max + t * t;
+                    max = max + t * local_rows;
                     for (int k = max + i * rows_per_rank[j]; k < max + (i + 1) * rows_per_rank[j]; k++) {
                         temp[index++] = local_data[k];
                     }
                 }
             } 
 
-            if (l == 1){
-                printf("Rank %d\n", rank);
-                for (int i = 0; i < local_rows; i++) {
-                    for (int j = 0; j < n; j++) {
-                        printf("%d ", temp[i * n + j]);
-                    }
-                    printf("\n");
-                }
-            }  
-
             // Column-wise sorting
-            //for (int i = 0; i < local_rows; i++) {
-            //    qsort(&local_data[i * n], n, sizeof(int), compare_asc);
-            //}
+            for (int i = 0; i < local_rows; i++) {
+                qsort(&temp[i * n], n, sizeof(int), compare_asc);
+            }            
+
+            // Reorder the local data for Alltoallv
+            index = 0;
+            for (int col = 0; col < n; col++) {
+                for (int row = 0; row < local_rows; row++) {
+                    local_data[index++] = temp[row * n + col];
+                }
+            }   
+
+            // Alltoallv Communication          
+            MPI_Alltoallv(local_data, rcounts, rdispls, MPI_INT, temp, rcounts, rdispls, MPI_INT, MPI_COMM_WORLD);                    
+            
+             // Reorder again to achieve transposition
+            index = 0;
+            for (int i = 0; i < local_rows; i++) {
+                int max = 0;
+                int t = 0;
+                for (int j = 0; j < size; j++) {
+                    if (j != 0) {
+                        t = rows_per_rank[j - 1];
+                    }
+                    max = max + t * local_rows;
+                    for (int k = max + i * rows_per_rank[j]; k < max + (i + 1) * rows_per_rank[j]; k++) {
+                        local_data[index++] = temp[k];
+                    }
+                }
+            }
 
             free(temp);
         }
