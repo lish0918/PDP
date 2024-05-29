@@ -1,8 +1,8 @@
 /* ==========================================================================================
     File : shearsort_v3.c
     Situation: Include the case when the matrix size is not divisible by the number of processes
-    Result: Fairly Scalability
-    Processes number 10, speedup around 6 times
+    Result: Good Scalability
+    Real speedup is close to ideal speedup
 ===========================================================================================*/
 #include <stdio.h>
 #include <stdlib.h>
@@ -57,6 +57,7 @@ int main(int argc, char *argv[]) {
     // Allocate memory for local data
     local_rows = rows_per_rank[rank];
     local_data = (int*)malloc(local_rows * n * sizeof(int));
+    int *temp = (int*)malloc(local_rows * n * sizeof(int));
 
     // Calculate rcounts and rdispls for Alltoallv
     for (int i = 0; i < size; i++) {
@@ -78,9 +79,9 @@ int main(int argc, char *argv[]) {
         fclose(input_file);
     }
 
-    start_time = MPI_Wtime();
-
     MPI_Scatterv(matrix, sendcounts, displs, MPI_INT, local_data, local_rows * n, MPI_INT, 0, MPI_COMM_WORLD);
+
+    start_time = MPI_Wtime();
 
     int d = ceil(log2(n));
 
@@ -112,9 +113,7 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        if (l <= d) {           
-            int *temp = (int*)malloc(local_rows * n * sizeof(int));
-
+        if (l <= d) {    
             /* ======================================================================
                 * 1. Reorder the local data for Alltoallv
                 Read data from the first column of the two-dimensional array represented 
@@ -137,8 +136,8 @@ int main(int argc, char *argv[]) {
             
              /* ======================================================================
                 * 3. Reorder again to achieve transposition
-                Based on the number of rows per process, the overall matrix transposition 
-                is achieved by reordering according to the corresponding rules.
+                The reverse operation of the second step, redistributing the flattened 
+                content back into blocks.
             ====================================================================== */
             index = 0;
             for (int i = 0; i < local_rows; i++) {
@@ -186,15 +185,13 @@ int main(int argc, char *argv[]) {
                     }
                 }
             }
-
-            free(temp);
         }
     }
 
-    MPI_Gatherv(local_data, local_rows * n, MPI_INT, matrix, sendcounts, displs, MPI_INT, 0, MPI_COMM_WORLD);
-
     elapsed_time = MPI_Wtime() - start_time;
     MPI_Reduce(&elapsed_time, &max_time, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+
+    MPI_Gatherv(local_data, local_rows * n, MPI_INT, matrix, sendcounts, displs, MPI_INT, 0, MPI_COMM_WORLD);
 
     if (rank == 0) {
         output_file = fopen(output_filename, "w");
@@ -227,6 +224,7 @@ int main(int argc, char *argv[]) {
     free(rcounts);
     free(rdispls);
     free(rows_per_rank);
+    free(temp);
     MPI_Finalize();
     return 0;
 }

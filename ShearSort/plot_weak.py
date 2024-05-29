@@ -1,10 +1,10 @@
 import matplotlib.pyplot as plt
 
 # 进程数
-process_numbers = list(range(1, 9))
+process_numbers = [1, 4, 9, 16, 25, 36, 49, 64]
 
 # Efficiency 数据
-efficiency = [1.00, 0.77, 0.75, 0.73, 0.69, 0.65, 0.62, 0.60]
+efficiency = [1.00, 1.05, 1.02, 0.86, 0.68, 0.55, 0.43, 0.33]
 
 # 理想 Efficiency，均为 1
 ideal_efficiency = [1] * len(process_numbers)
